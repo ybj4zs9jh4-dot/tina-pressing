@@ -1,0 +1,54 @@
+{
+  "name": "Tina - Mon e-pressing",
+  "short_name": "Tina",
+  "description": "Gestion complète de pressing avec fidélité, livraisons et WhatsApp",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#667eea",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "https://i.imgur.com/w7lMrGm.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://i.imgur.com/vN1ecVQ.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity", "utilities"],
+  "lang": "fr-FR",
+  "dir": "ltr",
+  "shortcuts": [
+    {
+      "name": "Nouvelle commande",
+      "short_name": "Commande",
+      "description": "Créer une nouvelle commande rapidement",
+      "url": "/?action=new-order",
+      "icons": [
+        {
+          "src": "https://i.imgur.com/w7lMrGm.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Vue Propriétaire",
+      "short_name": "Proprio",
+      "description": "Accéder aux statistiques propriétaire",
+      "url": "/?role=proprietaire",
+      "icons": [
+        {
+          "src": "https://i.imgur.com/w7lMrGm.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}

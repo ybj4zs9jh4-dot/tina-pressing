@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tina - Mon e-pressing</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Firebase SDK v9 Compat -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+  <script>
+    // Configuration Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyBfobNvRajoDe2nVkO_Bs3133EeNi-8VOg",
+      authDomain: "tina-e-pressing.firebaseapp.com",
+      projectId: "tina-e-pressing",
+      storageBucket: "tina-e-pressing.firebasestorage.app",
+      messagingSenderId: "814970939693",
+      appId: "1:814970939693:web:7ba21ced9a49bd9d9c8ba4"
+    };
+
+    console.log('🔥 Initialisation Firebase...');
+    
+    try {
+      // Initialiser Firebase
+      const app = firebase.initializeApp(firebaseConfig);
+      const db = firebase.firestore();
+      
+      // Rendre accessible globalement
+      window.__firestoreDb = db;
+      window.__firestoreFns = {
+        doc: (path1, path2) => db.collection(path1).doc(path2),
+        getDoc: async (docRef) => {
+          const snapshot = await docRef.get();
+          return {
+            exists: () => snapshot.exists,
+            data: () => snapshot.data()
+          };
+        },
+        setDoc: async (docRef, data, options) => {
+          if (options?.merge) {
+            return await docRef.set(data, { merge: true });
+          }
+          return await docRef.set(data);
+        },
+        deleteDoc: async (docRef) => {
+          return await docRef.delete();
+        }
+      };
+      
+      console.log('✅ Firebase chargé avec succès !');
+      console.log('✅ DB disponible:', !!window.__firestoreDb);
+      console.log('✅ Fonctions disponibles:', !!window.__firestoreFns);
+
+      // Migration automatique localStorage → Firebase
+      (async () => {
+        const keys = ['clients', 'commandes', 'transactions', 'charges'];
+        
+        for (const key of keys) {
+          const localData = localStorage.getItem(key);
+          
+          if (localData) {
+            try {
+              const docRef = db.collection('tina-data').doc(key);
+              const docSnap = await docRef.get();
+              
+              if (!docSnap.exists) {
+                const parsed = JSON.parse(localData);
+                await docRef.set({ 
+                  value: parsed, 
+                  updatedAt: new Date().toISOString() 
+                });
+                console.log(`✅ ${key} migré vers Firebase`);
+              } else {
+                const data = docSnap.data();
+                const value = JSON.stringify(data.value);
+                localStorage.setItem(key, value);
+                console.log(`🔄 ${key} synchronisé depuis Firebase`);
+              }
+            } catch (e) {
+              console.warn(`⚠️ Erreur ${key}:`, e.message);
+            }
+          } else {
+            try {
+              const docRef = db.collection('tina-data').doc(key);
+              const docSnap = await docRef.get();
+              
+              if (docSnap.exists) {
+                const data = docSnap.data();
+                const value = JSON.stringify(data.value);
+                localStorage.setItem(key, value);
+                console.log(`📥 ${key} chargé depuis Firebase`);
+              }
+            } catch(e) {
+              console.warn(`⚠️ Erreur chargement ${key}:`, e.message);
+            }
+          }
+        }
+        
+        console.log('✅ Synchronisation Firebase terminée !');
+      })();
+
+    } catch (error) {
+      console.error('❌ ERREUR FIREBASE:', error);
+      console.error('Message:', error.message);
+      console.log('⚠️ Mode local activé');
+    }
+  </script>
+
+  <style>
+    * { 
+      margin: 0; 
+      padding: 0; 
+      box-sizing: border-box; 
+    }
+    
+    body { 
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    
+    #root { 
+      min-height: 100vh; 
+    }
+    
+    input, textarea, select { 
+      min-height: 56px; 
+      font-size: 16px !important; 
+    }
+    /* Dans <style> */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+  </style>
+  <!-- Avant </head> -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- TON CODE APP.JS -->
+  <script type="text/babel">
+    // 👇 COLLE TOUT TON CODE APP.JS ICI
+    // De "import React..." jusqu'à la fin
+  </script>
+
+  <!-- Babel pour JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</body>
+</html>
