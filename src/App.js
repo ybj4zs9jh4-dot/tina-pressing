@@ -3741,28 +3741,44 @@ const ModalNouvelleCommande = React.memo(
     commandeEnModification,
     articlesPersonnalises,
     creerArticlePersonnalise,
+    getPromoActiveForClient,
   }) => {
     const [fideliteInfo, setFideliteInfo] = useState(null);
     const [searchArticle, setSearchArticle] = useState('');
 
     const verifierFidelite = useCallback(
-      (tel) => {
+      async (tel) => {
         if (tel.length >= 8) {
           const commandesClient = commandes.filter((c) => c.clientTel === tel);
-          const stats = { nombreCommandes: commandesClient.length };
-          const fidelite = getNiveauFidelite(stats.nombreCommandes);
+          const commandesTerminees = commandesClient.filter((c) => c.statut === 'livre');
+          const fidelite = getNiveauFidelite(commandesTerminees.length);
           setFideliteInfo(fidelite);
 
-          if (fidelite.remise > 0) {
+          const promoActive = await getPromoActiveForClient(tel);
+
+          if (promoActive) {
+            setNouvelleCommande((prev) => ({
+              ...prev,
+              remise: promoActive.valeurRemise,
+              typeRemise: promoActive.typeRemise,
+              _promoAppliquee: promoActive.nom,
+            }));
+          } else if (fidelite.remise > 0) {
             setNouvelleCommande((prev) => ({
               ...prev,
               remise: fidelite.remise,
               typeRemise: 'pourcentage',
+              _promoAppliquee: null,
+            }));
+          } else {
+            setNouvelleCommande((prev) => ({
+              ...prev,
+              _promoAppliquee: null,
             }));
           }
         }
       },
-      [commandes, getNiveauFidelite, setNouvelleCommande]
+      [commandes, getNiveauFidelite, getPromoActiveForClient, setNouvelleCommande]
     );
 
     const recalculerTotal = useCallback(() => {
@@ -3870,6 +3886,16 @@ const ModalNouvelleCommande = React.memo(
                     <span className="font-semibold">
                       Client {fideliteInfo.niveau} - {fideliteInfo.remise}% de
                       remise automatique !
+                    </span>
+                  </div>
+                )}
+                {nouvelleCommande._promoAppliquee && (
+                  <div className="mt-2 bg-gradient-to-r from-pink-500 to-rose-600 text-white px-3 py-2 rounded-lg text-sm flex items-center gap-2">
+                    <span>🎁</span>
+                    <span className="font-semibold">
+                      Promo "{nouvelleCommande._promoAppliquee}" appliquée !
+                      Remise de {nouvelleCommande.remise}
+                      {nouvelleCommande.typeRemise === 'pourcentage' ? '%' : ' FCFA'} 🎉
                     </span>
                   </div>
                 )}
@@ -5809,6 +5835,271 @@ const CommandesModule = ({
     </div>
   );
 };
+const ModulePromotions = () => {
+  const [promotions, setPromotions] = useState([]);
+  const [showModal, setShowModal] = useState(false);
+  const [promoEnEdition, setPromoEnEdition] = useState(null);
+  const [nouvellePromo, setNouvellePromo] = useState({
+    nom: '',
+    description: '',
+    typeRemise: 'pourcentage',
+    valeurRemise: 0,
+    dateDebut: new Date().toISOString().split('T')[0],
+    dateFin: '',
+    cibleFidelite: 'tous',
+    active: true,
+  });
+
+  useEffect(() => { loadPromotions(); }, []);
+
+  const loadPromotions = async () => {
+    try {
+      const data = await storage.get('promotions');
+      if (data?.value) setPromotions(JSON.parse(data.value));
+    } catch (error) { console.log('Aucune promotion'); }
+  };
+
+  const savePromotions = async (promos) => {
+    await storage.set('promotions', JSON.stringify(promos));
+  };
+
+  const resetForm = () => {
+    setPromoEnEdition(null);
+    setNouvellePromo({
+      nom: '', description: '', typeRemise: 'pourcentage',
+      valeurRemise: 0, dateDebut: new Date().toISOString().split('T')[0],
+      dateFin: '', cibleFidelite: 'tous', active: true,
+    });
+  };
+
+  const isPromoActive = (promo) => {
+    const now = new Date();
+    if (!promo.active) return false;
+    if (new Date(promo.dateDebut) > now) return false;
+    if (promo.dateFin && new Date(promo.dateFin) < now) return false;
+    return true;
+  };
+
+  const getStatutPromo = (promo) => {
+    const now = new Date();
+    if (!promo.active) return { label: 'Désactivée', color: 'gray' };
+    if (new Date(promo.dateDebut) > now) return { label: 'À venir', color: 'blue' };
+    if (promo.dateFin && new Date(promo.dateFin) < now) return { label: 'Expirée', color: 'red' };
+    return { label: 'Active', color: 'green' };
+  };
+
+  const enregistrerPromo = async () => {
+    if (!nouvellePromo.nom || !nouvellePromo.valeurRemise || !nouvellePromo.dateDebut) {
+      alert('Veuillez remplir tous les champs obligatoires'); return;
+    }
+    const promo = {
+      id: promoEnEdition?.id || Date.now().toString(),
+      ...nouvellePromo,
+      createdAt: promoEnEdition?.createdAt || new Date().toISOString(),
+    };
+    const newPromos = promoEnEdition
+      ? promotions.map((p) => (p.id === promo.id ? promo : p))
+      : [...promotions, promo];
+    setPromotions(newPromos);
+    await savePromotions(newPromos);
+    setShowModal(false);
+    resetForm();
+  };
+
+  const supprimerPromo = async (id) => {
+    if (!confirm('Supprimer cette promotion ?')) return;
+    const newPromos = promotions.filter((p) => p.id !== id);
+    setPromotions(newPromos);
+    await savePromotions(newPromos);
+  };
+
+  const toggleActif = async (id) => {
+    const newPromos = promotions.map((p) => p.id === id ? { ...p, active: !p.active } : p);
+    setPromotions(newPromos);
+    await savePromotions(newPromos);
+  };
+
+  const editerPromo = (promo) => {
+    setPromoEnEdition(promo);
+    setNouvellePromo({
+      nom: promo.nom, description: promo.description,
+      typeRemise: promo.typeRemise, valeurRemise: promo.valeurRemise,
+      dateDebut: promo.dateDebut, dateFin: promo.dateFin || '',
+      cibleFidelite: promo.cibleFidelite, active: promo.active,
+    });
+    setShowModal(true);
+  };
+
+  const promosActives = promotions.filter(isPromoActive);
+
+  const niveauLabels = {
+    tous: '👥 Tous les clients',
+    Standard: '💙 Standard et plus',
+    Argent: '🥈 Argent et plus',
+    Or: '⭐ Or et plus',
+    VIP: '👑 VIP uniquement',
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-gradient-to-r from-pink-500 to-rose-600 text-white rounded-2xl p-6 shadow-lg">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-2xl font-bold mb-1">🎁 Promotions Périodiques</h2>
+            <p className="text-sm opacity-90">Créez des offres temporaires appliquées automatiquement à la commande</p>
+          </div>
+          <button onClick={() => { resetForm(); setShowModal(true); }} className="bg-white text-pink-600 px-5 py-2.5 rounded-xl font-bold hover:bg-pink-50 transition flex items-center gap-2 shadow-lg">
+            <Plus className="w-5 h-5" />
+            Nouvelle promo
+          </button>
+        </div>
+        <div className="grid grid-cols-3 gap-4">
+          <div className="bg-white/20 rounded-xl p-4"><div className="text-xs opacity-90 mb-1">Total</div><div className="text-3xl font-bold">{promotions.length}</div></div>
+          <div className="bg-white/20 rounded-xl p-4"><div className="text-xs opacity-90 mb-1">🟢 Actives</div><div className="text-3xl font-bold">{promosActives.length}</div></div>
+          <div className="bg-white/20 rounded-xl p-4"><div className="text-xs opacity-90 mb-1">🔵 À venir</div><div className="text-3xl font-bold">{promotions.filter((p) => p.active && new Date(p.dateDebut) > new Date()).length}</div></div>
+        </div>
+      </div>
+
+      {promosActives.length > 0 && (
+        <div className="bg-green-50 border-2 border-green-300 rounded-2xl p-4">
+          <h3 className="font-bold text-green-800 mb-3">🟢 Promotions actives ({promosActives.length})</h3>
+          <div className="space-y-2">
+            {promosActives.map((promo) => (
+              <div key={promo.id} className="bg-white rounded-xl p-3 flex items-center justify-between border border-green-200">
+                <div>
+                  <span className="font-bold text-gray-800">{promo.nom}</span>
+                  <span className="ml-2 bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-semibold">-{promo.valeurRemise}{promo.typeRemise === 'pourcentage' ? '%' : ' FCFA'}</span>
+                  <span className="ml-2 text-xs text-gray-500">→ {niveauLabels[promo.cibleFidelite]}</span>
+                </div>
+                {promo.dateFin && <div className="text-xs text-gray-500">Expire le {new Date(promo.dateFin).toLocaleDateString('fr-FR')}</div>}
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 bg-green-100 border border-green-300 rounded-lg p-2 text-xs text-green-700 flex items-center gap-2">
+            <Bell className="w-4 h-4" />
+            Ces remises s'appliquent automatiquement à la création d'une commande si le client est éligible.
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {promotions.length === 0 ? (
+          <div className="bg-white rounded-2xl p-12 text-center shadow-lg">
+            <div className="text-5xl mb-4">🎁</div>
+            <div className="text-gray-500 text-lg font-medium mb-2">Aucune promotion créée</div>
+            <div className="text-gray-400 text-sm">Créez votre première promotion pour fidéliser vos clients</div>
+          </div>
+        ) : (
+          promotions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map((promo) => {
+            const statut = getStatutPromo(promo);
+            const actif = isPromoActive(promo);
+            return (
+              <div key={promo.id} className={`bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition border-l-4 ${actif ? 'border-green-500' : statut.color === 'blue' ? 'border-blue-400' : statut.color === 'red' ? 'border-red-300' : 'border-gray-200'}`}>
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2 flex-wrap">
+                      <h3 className="text-xl font-bold text-gray-800">{promo.nom}</h3>
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold ${actif ? 'bg-green-100 text-green-700' : statut.color === 'blue' ? 'bg-blue-100 text-blue-700' : statut.color === 'red' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
+                        {statut.color === 'green' ? '🟢' : statut.color === 'blue' ? '🔵' : statut.color === 'red' ? '🔴' : '⚫'} {statut.label}
+                      </span>
+                      <span className="bg-pink-100 text-pink-700 px-3 py-1 rounded-full text-sm font-bold">-{promo.valeurRemise}{promo.typeRemise === 'pourcentage' ? '%' : ' FCFA'}</span>
+                      <span className="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-xs font-semibold">{niveauLabels[promo.cibleFidelite]}</span>
+                    </div>
+                    {promo.description && <p className="text-gray-600 text-sm mb-3">{promo.description}</p>}
+                    <div className="flex gap-4 text-sm text-gray-500 flex-wrap">
+                      <div>📅 Début : <span className="font-semibold text-gray-700">{new Date(promo.dateDebut).toLocaleDateString('fr-FR')}</span></div>
+                      <div>{promo.dateFin ? <>⏰ Fin : <span className="font-semibold text-gray-700">{new Date(promo.dateFin).toLocaleDateString('fr-FR')}</span></> : <span className="text-green-600 font-semibold">♾️ Sans date de fin</span>}</div>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2 ml-4">
+                    <button onClick={() => toggleActif(promo.id)} className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${promo.active ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
+                      {promo.active ? '⏸ Désactiver' : '▶️ Activer'}
+                    </button>
+                    <button onClick={() => editerPromo(promo)} className="px-4 py-2 bg-blue-100 text-blue-700 rounded-xl hover:bg-blue-200 text-sm font-semibold">✏️ Modifier</button>
+                    <button onClick={() => supprimerPromo(promo.id)} className="px-4 py-2 bg-red-100 text-red-700 rounded-xl hover:bg-red-200 text-sm font-semibold">🗑 Supprimer</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center">
+              <h2 className="text-2xl font-bold">{promoEnEdition ? '✏️ Modifier la promotion' : '🎁 Nouvelle promotion'}</h2>
+              <button onClick={() => { setShowModal(false); resetForm(); }} className="text-gray-400 hover:text-gray-600"><X className="w-6 h-6" /></button>
+            </div>
+            <div className="p-6 space-y-5">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Nom de la promotion <span className="text-red-500">*</span></label>
+                <input type="text" value={nouvellePromo.nom} onChange={(e) => setNouvellePromo({ ...nouvellePromo, nom: e.target.value })} placeholder="Ex: Fête des mères, Rentrée scolaire, Black Friday..." className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-pink-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Description (optionnel)</label>
+                <textarea value={nouvellePromo.description} onChange={(e) => setNouvellePromo({ ...nouvellePromo, description: e.target.value })} placeholder="Message visible dans la notification WhatsApp du client..." rows={2} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 outline-none" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Type de remise <span className="text-red-500">*</span></label>
+                  <select value={nouvellePromo.typeRemise} onChange={(e) => setNouvellePromo({ ...nouvellePromo, typeRemise: e.target.value })} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 outline-none">
+                    <option value="pourcentage">Pourcentage (%)</option>
+                    <option value="montant">Montant fixe (FCFA)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Valeur <span className="text-red-500">*</span></label>
+                  <input type="number" min="0" value={nouvellePromo.valeurRemise || ''} onChange={(e) => setNouvellePromo({ ...nouvellePromo, valeurRemise: Number(e.target.value) || 0 })} placeholder={nouvellePromo.typeRemise === 'pourcentage' ? 'Ex: 20' : 'Ex: 2000'} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 outline-none" />
+                </div>
+              </div>
+              {nouvellePromo.valeurRemise > 0 && (
+                <div className="bg-pink-50 border border-pink-200 rounded-xl p-3 text-sm text-pink-700 text-center font-semibold">
+                  🎁 Remise de {nouvellePromo.valeurRemise}{nouvellePromo.typeRemise === 'pourcentage' ? '%' : ' FCFA'}
+                  {nouvellePromo.typeRemise === 'pourcentage' && <span className="block text-xs font-normal mt-1 text-pink-600">Ex: Commande de 10 000 FCFA → {(10000 * (1 - nouvellePromo.valeurRemise / 100)).toLocaleString()} FCFA</span>}
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Date de début <span className="text-red-500">*</span></label>
+                  <input type="date" value={nouvellePromo.dateDebut} onChange={(e) => setNouvellePromo({ ...nouvellePromo, dateDebut: e.target.value })} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Date de fin <span className="text-gray-400">(optionnel)</span></label>
+                  <input type="date" value={nouvellePromo.dateFin} min={nouvellePromo.dateDebut} onChange={(e) => setNouvellePromo({ ...nouvellePromo, dateFin: e.target.value })} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 outline-none" />
+                  {!nouvellePromo.dateFin && <div className="text-xs text-gray-400 mt-1">Laisser vide = sans limite de temps</div>}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Clients ciblés <span className="text-red-500">*</span></label>
+                <div className="grid grid-cols-1 gap-2">
+                  {['tous', 'Standard', 'Argent', 'Or', 'VIP'].map((niveau) => (
+                    <label key={niveau} className={`flex items-center gap-3 p-3 border-2 rounded-xl cursor-pointer transition ${nouvellePromo.cibleFidelite === niveau ? 'border-pink-500 bg-pink-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                      <input type="radio" name="cibleFidelite" value={niveau} checked={nouvellePromo.cibleFidelite === niveau} onChange={(e) => setNouvellePromo({ ...nouvellePromo, cibleFidelite: e.target.value })} className="w-4 h-4 text-pink-500" />
+                      <span className="font-medium">{niveauLabels[niveau]}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex items-center gap-3">
+                <input type="checkbox" id="promoActive" checked={nouvellePromo.active} onChange={(e) => setNouvellePromo({ ...nouvellePromo, active: e.target.checked })} className="w-5 h-5 text-pink-500 rounded" />
+                <label htmlFor="promoActive" className="font-medium text-gray-700 cursor-pointer">Activer cette promotion immédiatement</label>
+              </div>
+              <div className="flex gap-3 pt-2 border-t">
+                <button onClick={() => { setShowModal(false); resetForm(); }} className="flex-1 px-6 py-3 border-2 border-gray-300 rounded-xl hover:bg-gray-50 transition font-medium">Annuler</button>
+                <button onClick={enregistrerPromo} className="flex-1 bg-gradient-to-r from-pink-500 to-rose-600 text-white px-6 py-3 rounded-xl hover:from-pink-600 hover:to-rose-700 transition font-bold shadow-lg">
+                  {promoEnEdition ? 'Enregistrer' : 'Créer la promotion'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 function TinaManager({ onLogout }) {
   const [activeModule, setActiveModule] = useState('dashboard');
   const [commandes, setCommandes] = useState([]);
@@ -5954,6 +6245,51 @@ function TinaManager({ onLogout }) {
       icone: '💙',
     };
   };
+
+  const getPromoActiveForClient = useCallback(async (clientTel) => {
+    try {
+      const data = await storage.get('promotions');
+      if (!data?.value) return null;
+
+      const promotions = JSON.parse(data.value);
+      const now = new Date();
+
+      const commandesClient = commandes.filter((c) => c.clientTel === clientTel);
+      const commandesTerminees = commandesClient.filter((c) => c.statut === 'livre');
+      const niveauClient = getNiveauFidelite(commandesTerminees.length).niveau;
+
+      const ordreNiveaux = ['Standard', 'Argent', 'Or', 'VIP'];
+      const indexClientNiveau = ordreNiveaux.indexOf(niveauClient);
+
+      const promosEligibles = promotions.filter((promo) => {
+        if (!promo.active) return false;
+        if (new Date(promo.dateDebut) > now) return false;
+        if (promo.dateFin && new Date(promo.dateFin) < now) return false;
+        if (promo.cibleFidelite === 'tous') return true;
+        const indexCible = ordreNiveaux.indexOf(promo.cibleFidelite);
+        return indexClientNiveau >= indexCible;
+      });
+
+      if (promosEligibles.length === 0) return null;
+
+      const MONTANT_TEST = 10000;
+      return promosEligibles.reduce((best, promo) => {
+        const valeurPromo = promo.typeRemise === 'pourcentage'
+          ? (MONTANT_TEST * promo.valeurRemise) / 100
+          : promo.valeurRemise;
+        const valeurBest = best
+          ? (best.typeRemise === 'pourcentage'
+              ? (MONTANT_TEST * best.valeurRemise) / 100
+              : best.valeurRemise)
+          : 0;
+        return valeurPromo > valeurBest ? promo : best;
+      }, null);
+    } catch (error) {
+      console.error('Erreur getPromoActiveForClient:', error);
+      return null;
+    }
+  }, [commandes, getNiveauFidelite]);
+
 
   const getClientStats = (clientTel) => {
     const commandesClient = commandes.filter((c) => c.clientTel === clientTel);
@@ -7638,6 +7974,12 @@ Merci ! 🙏`;
                 icon: FileText,
                 shortLabel: 'Tarifs',
               },
+              {
+                id: 'promotions',
+                label: 'Promotions',
+                icon: ShoppingCart,
+                shortLabel: 'Promos',
+              },
             ].map((module) => (
               <button
                 key={module.id}
@@ -7691,6 +8033,7 @@ Merci ! 🙏`;
             saveArticlesPersonnalises={saveArticlesPersonnalises}
           />
         )}
+        {activeModule === 'promotions' && <ModulePromotions />}
       </main>
 
       {showModal &&
@@ -7710,6 +8053,7 @@ Merci ! 🙏`;
             commandeEnModification={commandeEnModification}
             articlesPersonnalises={articlesPersonnalises}
             creerArticlePersonnalise={creerArticlePersonnalise}
+            getPromoActiveForClient={getPromoActiveForClient}
           />
         )}
     </div>
